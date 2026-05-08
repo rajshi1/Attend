@@ -1,0 +1,1973 @@
+<!DOCTYPE html>
+<html lang="en" x-data="appHandler()" @firebase-ready.window="initAuth()">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AttendTrack Pro | Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut, deleteUser, updatePassword, reauthenticateWithCredential, EmailAuthProvider, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteDoc, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyC1r_j6AeuY5aCrHWtVOGgsjs7Z03x_k9Q",
+            authDomain: "attendance-c8878.firebaseapp.com",
+            projectId: "attendance-c8878",
+            storageBucket: "attendance-c8878.firebasestorage.app",
+            messagingSenderId: "1000948629138",
+            appId: "1:1000948629138:web:257c5170f88de4803c704b",
+            measurementId: "G-8K7J71G1S4"
+        };
+        const app = initializeApp(firebaseConfig);
+        window.auth = getAuth(app);
+        window.db = getFirestore(app);
+
+        // ENABLE OFFLINE PERSISTENCE
+        enableIndexedDbPersistence(window.db).catch((err) => {
+            if (err.code == 'failed-precondition') {
+                console.warn("Persistence failed: Multiple tabs open.");
+            } else if (err.code == 'unimplemented') {
+                console.warn("Persistence not supported by this browser.");
+            }
+        });
+
+        window.storage = getStorage(app);
+        window.fb = { createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut, doc, setDoc, getDoc, updateDoc, deleteDoc, deleteUser, updatePassword, reauthenticateWithCredential, EmailAuthProvider, sendPasswordResetEmail, ref, uploadBytes, getDownloadURL };
+        window.dispatchEvent(new CustomEvent('firebase-ready'));
+    </script>
+
+    <style>
+        [x-cloak] {
+            display: none !important;
+        }
+
+        body {
+            background: #0b0e14;
+            color: #f8fafc;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .glass {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 1.5rem;
+        }
+
+        .gradient-text {
+            background: linear-gradient(to right, #6366f1, #a855f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .progress-bar-bg {
+            background: #30363d;
+            height: 8px;
+            border-radius: 10px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .threshold-line {
+            position: absolute;
+            left: 75%;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: #8b949e;
+            z-index: 5;
+            opacity: 0.5;
+        }
+
+        .cal-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 6px;
+        }
+
+        .day-box {
+            aspect-ratio: 1/1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 0.75rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+    </style>
+</head>
+
+<body class="antialiased">
+
+    <div x-show="!isLoggedIn" class="min-h-screen flex items-center justify-center p-6">
+        <div x-show="view === 'signin'"
+            class="glass p-10 rounded-[2.5rem] w-full max-w-md shadow-2xl relative overflow-hidden"
+            x-data="{ forgotMode: false, resetSent: false, resetEmail: '' }">
+
+            <!-- VIEW 1: Standard Sign In -->
+            <div x-show="!forgotMode">
+                <h2 class="text-4xl font-black mb-2">Sign In</h2>
+                <template x-if="localMessage.text">
+                    <div x-transition x-init="setTimeout(() => localMessage.text = '', 5000)"
+                        :class="localMessage.type === 'error' ? 'bg-rose-500/10 border-rose-500/30 text-rose-400' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'"
+                        class="p-4 rounded-2xl border text-[11px] font-bold mb-4 flex items-center gap-3">
+                        <span x-text="localMessage.type === 'error' ? '⚠️' : '✅'"></span>
+                        <span x-text="localMessage.text"></span>
+                    </div>
+                </template>
+                <p class="text-slate-400 mb-8 text-sm">Log in to sync your attendance.</p>
+
+                <div class="space-y-4">
+                    <input x-model="loginForm.email" type="email" placeholder="Email"
+                        class="w-full bg-slate-800/50 p-4 rounded-2xl border border-slate-700 outline-none transition-all focus:border-indigo-500">
+
+                    <input x-model="loginForm.pass" type="password" placeholder="Password"
+                        class="w-full bg-slate-800/50 p-4 rounded-2xl border border-slate-700 outline-none transition-all focus:border-indigo-500">
+
+                    <!-- Forgot Password Link -->
+                    <div class="text-right px-2">
+                        <span @click="forgotMode = true; resetEmail = loginForm.email"
+                            class="text-[10px] font-black uppercase tracking-widest text-indigo-400 cursor-pointer hover:text-indigo-300">
+                            Forgot Password?
+                        </span>
+                    </div>
+
+                    <button @click="handleLogin()" :disabled="loading"
+                        class="w-full bg-indigo-600 py-4 rounded-2xl font-bold shadow-lg transition hover:bg-indigo-500 active:scale-95 mt-2 disabled:opacity-50">
+                        <span x-show="!loading">Login</span>
+                        <span x-show="loading">Authenticating...</span>
+                    </button>
+
+                    <div class="text-center pt-2">
+                        <p class="text-sm text-slate-400">New student? <span @click="view = 'signup1'"
+                                class="text-indigo-400 cursor-pointer font-bold">Create Account</span></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW 2: Forgot Password "Tab" -->
+            <div x-show="forgotMode" x-transition class="flex flex-col h-full">
+                <h2 class="text-3xl font-black mb-2 text-amber-500">Reset Password</h2>
+
+                <p class="text-slate-400 mb-8 text-sm">Enter your email to receive a secure reset link.</p>
+
+                <div class="space-y-4" x-show="!resetSent">
+                    <input x-model="resetEmail" type="email" placeholder="Registered Email"
+                        class="w-full bg-slate-800/50 p-4 rounded-2xl border border-slate-700 outline-none focus:border-amber-500 transition-all">
+
+                    <button @click="loading = true; window.fb.sendPasswordResetEmail(window.auth, resetEmail)
+                    .then(() => { resetSent = true; loading = false; })
+                    .catch((e) => { alert(e.message); loading = false; })" :disabled="loading || !resetEmail"
+                        class="w-full bg-amber-600 py-4 rounded-2xl font-bold text-white shadow-lg active:scale-95 disabled:opacity-50">
+                        <span x-show="!loading">Send Reset Link</span>
+                        <span x-show="loading">Processing...</span>
+                    </button>
+
+                    <button @click="forgotMode = false"
+                        class="w-full text-slate-500 text-xs font-bold uppercase tracking-widest">
+                        Back to Login
+                    </button>
+                </div>
+
+                <!-- Local Success Popup (Desktop-style, not at top) -->
+                <div x-show="resetSent" x-transition
+                    class="bg-emerald-500/10 border border-emerald-500/30 p-6 rounded-3xl mt-4 text-center">
+                    <div class="text-3xl mb-3">📧</div>
+                    <p class="text-emerald-400 font-bold text-sm mb-2">Reset Link Sent!</p>
+                    <p class="text-slate-400 text-[11px] leading-relaxed mb-4">
+                        Check your inbox for the reset link. If not found, please **check your spam mail**.
+                    </p>
+                    <button @click="forgotMode = false; resetSent = false"
+                        class="bg-emerald-600 px-6 py-2 rounded-xl text-[10px] font-black uppercase text-white">
+                        Back to Login
+                    </button>
+                </div>
+            </div>
+        </div>
+
+
+        <div x-show="view === 'signup1'" class="glass p-10 rounded-[2.5rem] w-full max-w-md shadow-2xl" x-cloak>
+            <h2 class="text-3xl font-black mb-6 text-indigo-400">Step 1</h2>
+
+            <div class="space-y-4" x-data="{ attempted: false }">
+                <div>
+                    <input x-model="reg.name" type="text" placeholder="Full Name *"
+                        :class="attempted && !reg.name ? 'border-rose-500' : 'border-slate-700'"
+                        class="w-full bg-slate-800/50 p-4 rounded-2xl border outline-none transition-colors">
+                    <p x-show="attempted && !reg.name" class="text-rose-500 text-[10px] font-bold mt-1 ml-2 uppercase">
+                        Name is required</p>
+                </div>
+
+                <div>
+                    <input x-model="reg.roll" type="text" placeholder="Roll No *"
+                        :class="attempted && !reg.roll ? 'border-rose-500' : 'border-slate-700'"
+                        class="w-full bg-slate-800/50 p-4 rounded-2xl border outline-none transition-colors">
+                    <p x-show="attempted && !reg.roll" class="text-rose-500 text-[10px] font-bold mt-1 ml-2 uppercase">
+                        Roll number is required</p>
+                </div>
+
+                <div>
+                    <input x-model="reg.sem" type="number" placeholder="Semester *"
+                        :class="attempted && !reg.sem ? 'border-rose-500' : 'border-slate-700'"
+                        class="w-full bg-slate-800/50 p-4 rounded-2xl border outline-none transition-colors">
+                    <p x-show="attempted && !reg.sem" class="text-rose-500 text-[10px] font-bold mt-1 ml-2 uppercase">
+                        Select your semester</p>
+                </div>
+
+                <div>
+                    <input x-model="reg.email" type="email" placeholder="Email ID *"
+                        :class="attempted && (!reg.email || !reg.email.includes('@')) ? 'border-rose-500' : 'border-slate-700'"
+                        class="w-full bg-slate-800/50 p-4 rounded-2xl border outline-none transition-colors">
+                    <p x-show="attempted && !reg.email" class="text-rose-500 text-[10px] font-bold mt-1 ml-2 uppercase">
+                        Email is required</p>
+                    <p x-show="attempted && reg.email && !reg.email.includes('@')"
+                        class="text-rose-500 text-[10px] font-bold mt-1 ml-2 uppercase">Invalid email format</p>
+                </div>
+
+                <button @click="attempted = true; validateStep1()"
+                    class="w-full bg-indigo-600 py-4 rounded-2xl font-bold mt-4 shadow-lg shadow-indigo-500/20 active:scale-95 transition-transform">
+                    Next Step
+                </button>
+            </div>
+
+            <p class="text-center text-sm mt-6 text-slate-500">Already have an account? <span @click="view = 'signin'"
+                    class="text-indigo-400 cursor-pointer font-bold hover:underline">Sign In</span></p>
+        </div>
+
+        <div x-show="view === 'signup2'" class="glass p-10 rounded-[2.5rem] w-full max-w-md shadow-2xl" x-cloak
+            x-data="{ attempted: false }">
+            <h2 class="text-3xl font-black mb-6 text-indigo-400">Step 2</h2>
+            <div class="space-y-4">
+                <div>
+                    <input x-model="reg.pass" type="password" placeholder="Create Password"
+                        :class="attempted && (!reg.pass || reg.pass.length < 6) ? 'border-rose-500' : 'border-slate-700'"
+                        class="w-full bg-slate-800/50 p-4 rounded-2xl border outline-none transition-all">
+                    <p x-show="attempted && !reg.pass" class="text-rose-500 text-[10px] font-bold mt-1 ml-2 uppercase">
+                        Password required</p>
+                    <p x-show="attempted && reg.pass && reg.pass.length < 6"
+                        class="text-rose-500 text-[10px] font-bold mt-1 ml-2 uppercase">Minimum 6 characters</p>
+                </div>
+
+                <div>
+                    <input x-model="reg.confirm" type="password" placeholder="Confirm Password"
+                        :class="attempted && reg.pass !== reg.confirm ? 'border-rose-500' : 'border-slate-700'"
+                        class="w-full bg-slate-800/50 p-4 rounded-2xl border outline-none transition-all">
+                    <p x-show="attempted && reg.pass !== reg.confirm"
+                        class="text-rose-500 text-[10px] font-bold mt-1 ml-2 uppercase">Passwords do not match</p>
+                </div>
+
+                <button
+                    @click="attempted = true; if(reg.pass && reg.pass === reg.confirm && reg.pass.length >= 6) handleSignup()"
+                    :disabled="loading"
+                    class="w-full bg-emerald-600 py-4 rounded-2xl font-bold shadow-lg shadow-emerald-500/10 active:scale-95 transition-transform disabled:opacity-50">
+                    <span x-show="!loading">Complete Registration</span>
+                    <span x-show="loading">Creating Account...</span>
+                </button>
+
+                <button @click="view = 'signup1'"
+                    class="w-full text-slate-400 text-sm font-medium hover:text-white transition-colors">Go
+                    Back</button>
+            </div>
+        </div>
+        <div x-show="view === 'verify-email'" class="glass p-10 rounded-[2.5rem] w-full max-w-md shadow-2xl text-center"
+            x-cloak>
+            <div class="text-5xl mb-6">📧</div>
+            <h2 class="text-2xl font-black mb-4 text-indigo-400">Verify Your Email</h2>
+            <template x-if="localMessage.text">
+                <div x-transition x-init="setTimeout(() => localMessage.text = '', 5000)"
+                    :class="localMessage.type === 'error' ? 'bg-rose-500/10 border-rose-500/30 text-rose-400' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'"
+                    class="p-4 rounded-2xl border text-[11px] font-bold mb-4 flex items-center gap-3">
+                    <span x-text="localMessage.type === 'error' ? '⚠️' : '✅'"></span>
+                    <span x-text="localMessage.text"></span>
+                </div>
+            </template>
+            <p class="text-slate-400 text-sm mb-6 leading-relaxed">
+                We've sent a verification link to <span class="text-white font-bold" x-text="reg.email"></span>.
+                Please click the link in that email or check spam mail to activate your account.
+            </p>
+
+            <div class="space-y-4">
+                <!-- Button to check if they've verified yet -->
+                <button @click="checkVerificationStatus()" :disabled="loading"
+                    class="w-full bg-indigo-600 py-4 rounded-2xl font-bold shadow-lg active:scale-95 transition-all disabled:opacity-50">
+                    <span x-show="!loading">I've Verified My Email</span>
+                    <span x-show="loading">Checking...</span>
+                </button>
+
+                <p class="text-[10px] text-slate-500 uppercase font-black tracking-widest">
+                    Didn't get it?
+                    <span @click="resendVerification()" class="text-indigo-400 cursor-pointer hover:underline">
+                        Click here to Resend
+                    </span>
+                </p>
+
+                <button @click="view = 'signin'" class="text-slate-500 text-xs font-bold">
+                    Back to Login
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="isLoggedIn" class="max-w-6xl mx-auto p-6 md:p-10" x-cloak>
+        <header class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10 glass p-8">
+            <div class="flex items-center gap-4">
+                <div
+                    class="w-16 h-16 rounded-full overflow-hidden border-2 border-indigo-500 shadow-xl shadow-indigo-500/20 bg-slate-800">
+                    <template x-if="userData.profilePic">
+                        <img :src="userData.profilePic" class="w-full h-full object-cover">
+                    </template>
+                    <template x-if="!userData.profilePic">
+                        <div class="w-full h-full bg-indigo-600 flex items-center justify-center text-2xl font-bold">
+                            <span x-text="userData.name ? userData.name.charAt(0) : 'U'"></span>
+                        </div>
+                    </template>
+                </div>
+                <div>
+                    <h1 class="text-3xl font-black">Welcome back, <span x-text="userData.name"
+                            class="gradient-text"></span>! 👋</h1>
+                    <p class="text-slate-500 text-sm font-medium"
+                        x-text="'Roll No: ' + userData.rollNo + ' • Sem ' + userData.semester"></p>
+                </div>
+            </div>
+
+            <div class="flex gap-4 items-center">
+                <template x-if="!isOnline">
+                    <div
+                        class="bg-amber-500/20 text-amber-500 px-3 py-1 rounded-full text-[10px] font-black animate-pulse border border-amber-500/20">
+                        OFFLINE</div>
+                </template>
+                <div class="bg-slate-800 px-4 py-2 rounded-full text-xs font-bold border border-slate-700">Avg <span
+                        x-text="calculateTotalAvg() || 0"></span>%</div>
+                <div class="relative" x-data="{ open: false }">
+                    <button @click="open = !open" class="p-2 hover:bg-slate-800 rounded-xl transition">
+                        <svg class="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z">
+                            </path>
+                        </svg>
+                    </button>
+                    <div x-show="open" @click.away="open = false"
+                        class="absolute right-0 mt-3 w-56 glass p-2 rounded-2xl shadow-xl z-50" x-cloak>
+
+                        <button @click="openEditProfile(); open = false"
+                            class="w-full text-left p-3 hover:bg-slate-700 rounded-xl text-sm font-bold">Edit
+                            Profile</button>
+
+                        <!-- NEW BUTTON -->
+                        <button @click="showHolidayListModal = true; open = false"
+                            class="w-full text-left p-3 hover:bg-slate-700 rounded-xl text-sm font-bold flex justify-between items-center">
+                            Holiday List <span>🌴</span>
+                        </button>
+
+                        <button @click="showArchiveModal = true; open = false"
+                            class="w-full text-left p-3 hover:bg-slate-700 rounded-xl text-sm font-bold flex justify-between items-center text-indigo-400">
+                            Archive Current Semester <span>📦</span>
+                        </button>
+
+                        <button @click="showPassResetModal = true; open = false"
+                            class="w-full text-left p-3 hover:bg-slate-700 rounded-xl text-sm font-bold">Reset
+                            Password</button>
+
+                        <button @click="handleLogout"
+                            class="w-full text-left p-3 hover:bg-slate-700 rounded-xl text-sm font-bold">Logout</button>
+
+                        <button @click="showDeleteConfirm = true; open = false"
+                            class="w-full text-left p-3 hover:bg-rose-900/20 rounded-xl text-sm font-bold text-rose-500 mt-1">
+                            Delete Account ⚠️
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
+            <div class="glass p-6 flex items-center gap-4 cursor-pointer hover:bg-slate-800/50"
+                @click="openEditProfile">
+                <div class="p-3 bg-slate-800 rounded-xl text-slate-400">👤</div>
+                <div>
+                    <p class="text-[10px] text-slate-500 uppercase font-black">Name</p>
+                    <p class="font-bold text-sm" x-text="userData.name"></p>
+                </div>
+            </div>
+            <div class="glass p-6 flex items-center gap-4">
+                <div class="p-3 bg-slate-800 rounded-xl text-slate-400">#</div>
+                <div>
+                    <p class="text-[10px] text-slate-500 uppercase font-black">Roll No</p>
+                    <p class="font-bold text-sm" x-text="userData.rollNo"></p>
+                </div>
+            </div>
+            <div class="glass p-6 flex items-center gap-4">
+                <div class="p-3 bg-slate-800 rounded-xl text-slate-400">📚</div>
+                <div>
+                    <p class="text-[10px] text-slate-500 uppercase font-black">Courses</p>
+                    <p class="font-bold text-sm" x-text="subjects.length"></p>
+                </div>
+            </div>
+            <div class="glass p-6 flex items-center gap-4">
+                <div class="p-3 bg-slate-800 rounded-xl text-slate-400">🎓</div>
+                <div>
+                    <p class="text-[10px] text-slate-500 uppercase font-black">Semester</p>
+                    <p class="font-bold text-sm" x-text="userData.semester"></p>
+                </div>
+            </div>
+        </div>
+
+        <div class="mb-10">
+            <h2 class="text-xl font-bold mb-6 flex items-center gap-2 italic">
+                Today's Schedule
+
+                <span
+                    class="text-[10px] bg-indigo-500/10 text-indigo-400 px-3 py-1 rounded-full border border-indigo-500/20 uppercase font-black tracking-widest"
+                    x-text="new Date().toLocaleDateString('en-US', {weekday: 'long'})"></span>
+            </h2>
+
+            <!-- BUTTONS SEPARATED: ONE ON FAR LEFT, ONE ON FAR RIGHT -->
+            <div class="flex justify-between items-center mb-8 w-full">
+
+                <!-- Left Aligned Button -->
+                <button @click="showExtraModal = true"
+                    class="bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 px-4 sm:px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all active:scale-95 flex items-center gap-2 shadow-sm">
+                    <span class="text-lg leading-none">+</span>
+                    <span>Extra Class</span>
+                </button>
+
+                <!-- Right Aligned Button -->
+                <button @click="showHolidayModal = true"
+                    class="bg-amber-500/10 text-amber-500 border border-amber-500/30 px-4 sm:px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-amber-500 hover:text-white transition-all active:scale-95 flex items-center gap-2 shadow-sm">
+                    <span>🌴</span>
+                    <span>Mark Holiday</span>
+                </button>
+
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+
+
+                <template x-for="(sub, index) in subjects.filter(s => 
+    (!isHoliday() && s.days && s.days.includes(new Date().toLocaleDateString('en-US', {weekday: 'short'}))) || 
+    (s.history && s.history[`${new Date().getFullYear()}-${new Date().getMonth()}-${new Date().getDate()}`])
+)" :key="index">
+
+                    <div class="relative group mb-2">
+                        <!-- Extra Class Badge (Shows only if today isn't a scheduled day) -->
+                        <template x-if="!sub.days.includes(new Date().toLocaleDateString('en-US', {weekday: 'short'}))">
+                            <span
+                                class="absolute -top-3 left-4 bg-indigo-600 text-[8px] font-black px-2 py-0.5 rounded-full border border-indigo-400 uppercase tracking-widest z-30 shadow-lg">
+                                Extra Class
+                            </span>
+                        </template>
+                        <!-- Inside Today's Schedule Card -->
+
+
+                        <!-- Main Card Container -->
+                        <div class="p-5 border-l-4 flex justify-between items-center transition-all duration-300 rounded-[1.5rem] border"
+                            :class="{
+                    'bg-emerald-500/10 border-emerald-500/50 shadow-lg shadow-emerald-500/5': getTodayStatus(sub) === 'P',
+                    'bg-rose-500/10 border-rose-500/50 shadow-lg shadow-rose-500/5': getTodayStatus(sub) === 'A',
+                    'bg-slate-800/80 border-slate-600 opacity-60': getTodayStatus(sub) === 'C',
+                    'glass border-slate-700 border-indigo-500': !getTodayStatus(sub)
+                }">
+
+
+                            <!-- Subject Info -->
+                            <div class="flex-1" @click="openCalendar(subjects.indexOf(sub))">
+                                <div class="flex items-center gap-2">
+                                    <p class="text-[9px] font-black uppercase tracking-tighter"
+                                        :class="getTodayStatus(sub) ? 'text-slate-400' : 'text-slate-500'"
+                                        x-text="sub.code || 'CLASS'"></p>
+
+                                    <!-- Show only TODAY'S specific time -->
+                                    <template
+                                        x-if="sub.schedule && sub.schedule[new Date().toLocaleDateString('en-US', {weekday: 'short'})]">
+                                        <span
+                                            class="text-[8px] bg-slate-800 text-indigo-400 px-1.5 py-0.5 rounded border border-slate-700 font-bold"
+                                            x-text="sub.schedule[new Date().toLocaleDateString('en-US', {weekday: 'short'})]"></span>
+                                    </template>
+                                </div>
+                                <p class="font-bold text-sm truncate"
+                                    :class="getTodayStatus(sub) === 'C' ? 'text-slate-400 line-through' : 'text-white'"
+                                    x-text="sub.name"></p>
+                                <div class="flex gap-2 mt-1">
+                                    <template x-if="sub.faculty">
+                                        <span class="text-[8px] text-slate-400 flex items-center gap-1">
+                                            <span class="opacity-50">👤</span> <span x-text="sub.faculty"></span>
+                                        </span>
+                                    </template>
+                                    <template x-if="sub.venue">
+                                        <span
+                                            class="text-[8px] text-indigo-300 bg-indigo-500/10 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                            <span class="opacity-50">📍</span> <span x-text="sub.venue"></span>
+                                        </span>
+                                    </template>
+                                </div>
+                            </div>
+
+                            <!-- Action Buttons -->
+                            <div class="flex gap-1.5 items-center flex-shrink-0">
+                                <!-- Present -->
+                                <button @click.stop="handleQuickMark(subjects.indexOf(sub), 'P')"
+                                    x-show="!getTodayStatus(sub) || getTodayStatus(sub) === 'P'"
+                                    class="p-2 rounded-xl transition-all active:scale-95"
+                                    :class="getTodayStatus(sub) === 'P' ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-slate-500 hover:text-emerald-500'">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3"
+                                            d="M5 13l4 4L19 7"></path>
+                                    </svg>
+                                </button>
+
+                                <!-- Absent -->
+                                <button @click.stop="handleQuickMark(subjects.indexOf(sub), 'A')"
+                                    x-show="!getTodayStatus(sub) || getTodayStatus(sub) === 'A'"
+                                    class="p-2 rounded-xl transition-all active:scale-95"
+                                    :class="getTodayStatus(sub) === 'A' ? 'bg-rose-500 text-white' : 'bg-slate-800 text-slate-500 hover:text-rose-500'">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3"
+                                            d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                </button>
+
+                                <!-- Skip / Holiday -->
+                                <button @click.stop="handleQuickMark(subjects.indexOf(sub), 'C')"
+                                    x-show="!getTodayStatus(sub) || getTodayStatus(sub) === 'C'"
+                                    class="p-2 rounded-xl transition-all active:scale-95"
+                                    title="Class Cancelled / Holiday"
+                                    :class="getTodayStatus(sub) === 'C' ? 'bg-slate-600 text-white' : 'bg-slate-800 text-slate-500 hover:text-slate-300'">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636">
+                                        </path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Reset Button -->
+                        <button x-show="getTodayStatus(sub)" @click.stop="clearTodayStatus(subjects.indexOf(sub))"
+                            class="absolute -top-2 -right-2 bg-slate-700 text-white w-6 h-6 rounded-full flex items-center justify-center text-[12px] shadow-xl hover:bg-rose-600 z-40 border-2 border-[#0b0e14] transition-all active:scale-75">
+                            &times;
+                        </button>
+                    </div>
+                </template>
+
+
+                <template x-if="!isHoliday() && subjects.filter(s => 
+        (s.days && s.days.includes(new Date().toLocaleDateString('en-US', {weekday: 'short'}))) || 
+        (s.history && s.history[`${new Date().getFullYear()}-${new Date().getMonth()}-${new Date().getDate()}`])
+    ).length === 0">
+                    <div
+                        class="col-span-full py-8 border-2 border-dashed border-slate-800 rounded-[2rem] flex flex-col items-center justify-center opacity-50">
+                        <span class="text-2xl mb-2">☕</span>
+                        <p class="text-xs font-black uppercase tracking-widest text-slate-500">No classes scheduled
+                            today.</p>
+                    </div>
+                </template>
+
+
+                <!-- Separate Template for Holiday to ensure it only shows when truly a holiday AND no extra classes logged -->
+                <template x-if="isHoliday() && subjects.filter(s => 
+        (s.history && s.history[`${new Date().getFullYear()}-${new Date().getMonth()}-${new Date().getDate()}`])
+    ).length === 0">
+                    <div
+                        class="col-span-full py-8 border-2 border-dashed border-slate-800 rounded-[2rem] flex flex-col items-center justify-center opacity-50">
+                        <span class="text-2xl mb-2">🌴</span>
+                        <span
+                            class="text-[10px] bg-amber-500/20 text-amber-500 px-3 py-1 rounded-full border border-amber-500/20 uppercase font-black tracking-widest mb-2">
+                            Holiday Mode
+                        </span>
+                        <p class="text-xs font-black uppercase tracking-widest text-slate-500">College is closed. Enjoy
+                            your break!</p>
+                    </div>
+                </template>
+
+            </div>
+        </div>
+        <div x-show="showHolidayModal"
+            class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[120] p-4" x-cloak>
+            <div class="glass p-8 rounded-[2.5rem] w-full max-w-sm">
+                <h2 class="text-2xl font-black mb-6">Add Holiday/Break</h2>
+
+                <input x-model="tempHoliday.label" type="text" placeholder="Event Name (e.g. Diwali)"
+                    class="w-full bg-slate-800 p-4 rounded-2xl mb-4 border border-slate-700 outline-none">
+
+                <div class="grid grid-cols-2 gap-3 mb-6">
+                    <div>
+                        <p class="text-[10px] font-bold text-slate-500 uppercase mb-2 ml-1">Start Date</p>
+                        <input x-model="tempHoliday.start" type="date"
+                            class="w-full bg-slate-800 p-3 rounded-xl border border-slate-700 text-xs">
+                    </div>
+                    <div>
+                        <p class="text-[10px] font-bold text-slate-500 uppercase mb-2 ml-1">End Date</p>
+                        <input x-model="tempHoliday.end" type="date"
+                            class="w-full bg-slate-800 p-3 rounded-xl border border-slate-700 text-xs">
+                    </div>
+                </div>
+
+                <div class="flex gap-3">
+                    <button @click="showHolidayModal = false" class="flex-1 font-bold text-slate-500">Cancel</button>
+                    <button @click="addHoliday()"
+                        class="flex-1 bg-amber-500 text-black py-3 rounded-2xl font-bold shadow-lg">Save Break</button>
+                </div>
+            </div>
+        </div>
+        <!-- Extra Class Selection Modal -->
+
+
+        <template x-if="isArchiveView">
+            <div
+                class="mb-6 flex items-center justify-between bg-amber-500/10 border border-amber-500/20 p-4 rounded-2xl">
+                <div class="flex items-center gap-3">
+                    <span class="text-xl">📂</span>
+                    <div>
+                        <p class="text-[10px] font-black text-amber-500 uppercase tracking-widest">Viewing Archive</p>
+                        <p class="text-sm font-bold text-white" x-text="isArchiveView.replace(/_/g, ' ')"></p>
+                    </div>
+                </div>
+                <button @click="exitArchive()"
+                    class="bg-amber-500 text-black px-4 py-2 rounded-xl text-xs font-black hover:bg-amber-400 transition-all active:scale-95">
+                    Back to Current Semester
+                </button>
+            </div>
+        </template>
+
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-xl font-bold">📊 Courses & Attendance</h2>
+            <button x-show="!isArchiveView" @click="showAddModal = true"
+                class="bg-indigo-600 px-5 py-2 rounded-xl text-xs font-bold transition hover:bg-indigo-500 shadow-lg shadow-indigo-500/20">+
+                Add New</button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <template x-for="(sub, index) in subjects" :key="index">
+                <!-- Wrap each card in its own scope to manage 'isEditing' locally -->
+                <div x-data="{ isEditing: false }" class="relative">
+
+                    <!-- 1. VIEW MODE (Your exact existing card) -->
+                    <div x-show="!isEditing"
+                        class="glass p-6 border-l-4 relative transition-all hover:border-indigo-500/50 shadow-lg flex flex-col h-full"
+                        :class="getPercent(sub) < 75 ? 'border-rose-500' : 'border-emerald-500'">
+
+                        <!-- Header Row -->
+                        <div class="flex justify-between items-start mb-4 gap-4">
+                            <div class="flex flex-wrap gap-2">
+                                <span
+                                    class="bg-slate-800 text-indigo-300 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider border border-slate-700"
+                                    x-text="sub.code ? sub.code : sub.name.substring(0,6)"></span>
+                                <div class="flex gap-2">
+                                    <span
+                                        class="bg-orange-500/10 text-orange-400 px-2.5 py-1 rounded-lg text-[10px] font-bold border border-orange-500/10"
+                                        x-text="getPercent(sub) + '%'"></span>
+                                    <span
+                                        :class="getPercent(sub) < 75 ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-500/10 text-emerald-500'"
+                                        class="px-2.5 py-1 rounded-lg text-[10px] font-bold"
+                                        x-text="getPercent(sub) < 75 ? 'At Risk' : 'Safe'"></span>
+                                </div>
+                            </div>
+
+                            <!-- Grouped Action Buttons -->
+                            <div class="flex gap-1.5 shrink-0">
+                                <!-- CHANGED: Instead of updateSubjectDetails, we set isEditing to true -->
+                                <button @click.stop="isEditing = true"
+                                    class="p-2 bg-slate-800/50 hover:bg-indigo-500/20 hover:text-indigo-400 rounded-xl transition-all border border-slate-700">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                                            d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z">
+                                        </path>
+                                    </svg>
+                                </button>
+                                <button @click.stop="deleteSubject(index)"
+                                    class="p-2 bg-slate-800/50 hover:bg-rose-500/20 hover:text-rose-500 rounded-xl transition-all border border-slate-700">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
+                                        </path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <h3 class="text-lg font-bold mb-5 leading-tight text-slate-100" x-text="sub.name"></h3>
+
+                        <div class="progress-bar-bg mb-5 shadow-inner relative">
+                            <div class="threshold-line"></div>
+                            <div class="h-full transition-all duration-1000" :style="'width: ' + getPercent(sub) + '%'"
+                                :class="getPercent(sub) < 75 ? 'bg-orange-500' : 'bg-emerald-500'"></div>
+                        </div>
+
+                        <div class="flex justify-between items-center text-[10px] font-black tracking-wide">
+                            <div class="flex gap-4 items-center">
+                                <span class="flex items-center gap-1.5 text-emerald-500">
+                                    <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                    <span
+                                        x-text="(sub.history ? Object.values(sub.history).filter(v => v === 'P').length : 0) + ' PRESENT'"></span>
+                                </span>
+                                <span class="flex items-center gap-1.5 text-rose-500">
+                                    <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+                                    <span
+                                        x-text="(sub.history ? Object.values(sub.history).filter(v => v === 'A').length : 0) + ' ABSENT'"></span>
+                                </span>
+                                <span class="flex items-center gap-1.5 text-slate-400 border-l border-slate-700 pl-3">
+                                    <span class="w-2 h-2 rounded-full bg-slate-500"></span>
+                                    <span
+                                        x-text="(sub.history ? Object.keys(sub.history).length : 0) + ' TOTAL'"></span>
+                                </span>
+                            </div>
+                            <div class="flex flex-col items-end">
+                                <template x-if="getPercent(sub) < 75">
+                                    <span
+                                        class="text-rose-400 font-bold bg-rose-500/10 px-3 py-1 rounded-lg border border-rose-500/10 uppercase"
+                                        x-text="'Attend ' + calculateNeeded(sub) + ' more'"></span>
+                                </template>
+                                <template x-if="getPercent(sub) >= 75">
+                                    <span
+                                        class="text-emerald-400 font-bold bg-emerald-500/10 px-3 py-1 rounded-lg border border-emerald-500/10 uppercase"
+                                        x-text="calculateSafeToMiss(sub) > 0 ? 'Safe to miss: ' + calculateSafeToMiss(sub) : 'On the limit'"></span>
+                                </template>
+                            </div>
+                        </div>
+
+                        <div class="flex gap-2 mt-6">
+                            <button @click="openCalendar(index)"
+                                class="flex-[2] bg-slate-800 hover:bg-indigo-600 hover:text-white py-3.5 rounded-2xl text-[10px] uppercase font-black tracking-widest transition-all border border-slate-700">Detailed
+                                History</button>
+                            <button @click="generatePDF(sub)"
+                                class="flex-1 bg-slate-800 hover:bg-emerald-600 hover:text-white py-3.5 rounded-2xl text-[10px] uppercase font-black transition-all border border-slate-700 flex items-center justify-center">PDF</button>
+                            <button @click="emailFaculty(sub)"
+                                class="flex-1 bg-slate-800 hover:bg-indigo-500 hover:text-white py-3.5 rounded-2xl text-[10px] uppercase font-black transition-all border border-slate-700 flex items-center justify-center">✉️</button>
+                        </div>
+                    </div>
+
+                    <!-- 2. EDIT MODE (The In-Place "Tab") -->
+                    <div x-show="isEditing" x-transition.opacity
+                        class="glass p-6 border-l-4 border-indigo-500 bg-indigo-500/5 shadow-2xl flex flex-col h-full absolute inset-0 z-40">
+
+                        <h3 class="text-xs font-black text-indigo-400 uppercase tracking-widest mb-6">Quick Edit</h3>
+
+                        <div class="space-y-4 mb-6">
+                            <div>
+                                <label class="text-[9px] font-bold text-slate-500 uppercase ml-1">Faculty Name</label>
+                                <input type="text" x-model="sub.faculty" placeholder="Enter Professor Name"
+                                    class="w-full bg-slate-900/50 p-3.5 rounded-xl border border-slate-700 text-sm text-white outline-none focus:border-indigo-500 transition-all">
+                            </div>
+                            <div>
+                                <label class="text-[9px] font-bold text-slate-500 uppercase ml-1">Venue / Room</label>
+                                <input type="text" x-model="sub.venue" placeholder="Enter Room No."
+                                    class="w-full bg-slate-900/50 p-3.5 rounded-xl border border-slate-700 text-sm text-white outline-none focus:border-indigo-500 transition-all">
+                            </div>
+                        </div>
+
+                        <div class="flex gap-3 mt-auto">
+                            <button @click="isEditing = false"
+                                class="flex-1 py-3 rounded-xl text-[10px] font-black uppercase text-slate-400 hover:bg-slate-800 transition-all">
+                                Cancel
+                            </button>
+                            <button @click="await sync(); isEditing = false"
+                                class="flex-1 py-3 bg-indigo-600 rounded-xl text-[10px] font-black uppercase text-white hover:bg-indigo-500 shadow-lg shadow-indigo-500/20 transition-all active:scale-95">
+                                Save Changes
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <div x-show="showAddModal"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[100] p-4" x-cloak>
+        <!-- Increased max-w-md to give room for the time inputs -->
+        <div class="glass p-8 rounded-[2.5rem] w-full max-w-md max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <h2 class="text-2xl font-black mb-6">New Subject</h2>
+
+            <!-- Inside Add Subject Modal -->
+            <div class="space-y-4 mb-6">
+                <input x-model="tempName" type="text" placeholder="Subject Name"
+                    class="w-full bg-slate-800 p-4 rounded-2xl border border-slate-700 outline-none focus:border-indigo-500 transition-all">
+
+                <input x-model="tempCode" type="text" placeholder="Subject Code (Optional)"
+                    class="w-full bg-slate-800 p-4 rounded-2xl border border-slate-700 outline-none focus:border-indigo-500 transition-all">
+
+                <!-- ADD THESE TWO NEW INPUTS -->
+                <div class="grid grid-cols-2 gap-3">
+                    <input x-model="tempFaculty" type="text" placeholder="Faculty Name"
+                        class="w-full bg-slate-800 p-4 rounded-2xl border border-slate-700 text-xs outline-none focus:border-indigo-500">
+                    <input x-model="tempVenue" type="text" placeholder="Room/Lab No."
+                        class="w-full bg-slate-800 p-4 rounded-2xl border border-slate-700 text-xs outline-none focus:border-indigo-500">
+                </div>
+            </div>
+
+            <p class="text-[10px] font-black text-slate-500 uppercase mb-3 ml-1 tracking-widest">Select Days & Times</p>
+
+            <!-- Day Selection Grid -->
+            <div class="space-y-3 mb-8">
+                <template x-for="day in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']" :key="day">
+                    <div class="flex flex-col gap-2 p-3 rounded-2xl border transition-all"
+                        :class="tempDays.includes(day) ? 'bg-indigo-600/10 border-indigo-500/50' : 'bg-slate-800/30 border-slate-700'">
+
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-3">
+                                <button
+                                    @click="tempDays.includes(day) ? tempDays = tempDays.filter(d => d !== day) : tempDays.push(day)"
+                                    class="w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all"
+                                    :class="tempDays.includes(day) ? 'bg-indigo-500 border-indigo-500 text-white' : 'border-slate-600 text-transparent'">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3"
+                                            d="M5 13l4 4L19 7"></path>
+                                    </svg>
+                                </button>
+                                <span class="text-sm font-bold"
+                                    :class="tempDays.includes(day) ? 'text-white' : 'text-slate-400'"
+                                    x-text="day"></span>
+                            </div>
+
+                            <!-- Time input appears only if the day is selected -->
+                            <template x-if="tempDays.includes(day)">
+                                <div x-data="{ 
+                                // Local sync to initialize the day's time in your schedule object
+                                init() { if(!tempSchedule[day]) tempSchedule[day] = '09:00' } 
+                            }">
+                                    <input type="time" x-model="tempSchedule[day]"
+                                        class="bg-slate-900 border border-slate-700 text-indigo-400 text-xs font-bold p-2 rounded-xl outline-none focus:border-indigo-500">
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <div class="flex gap-3">
+                <button @click="showAddModal = false; tempDays = []; tempSchedule = {}"
+                    class="flex-1 font-bold text-slate-500 py-3">Cancel</button>
+                <button @click="addSubject"
+                    class="flex-1 bg-indigo-600 py-3 rounded-2xl font-bold shadow-lg shadow-indigo-500/20 active:scale-95 transition-all">Add
+                    Subject</button>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="showEditModal"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[100] p-4" x-cloak>
+        <div class="glass p-8 rounded-[2.5rem] w-full max-w-md">
+            <h2 class="text-2xl font-black mb-6">Edit Profile</h2>
+
+            <div class="flex flex-col items-center gap-4 mb-8">
+                <div class="w-24 h-24 rounded-full overflow-hidden border-2 border-indigo-500 shadow-lg bg-slate-800">
+                    <template x-if="editData.profilePic">
+                        <img :src="editData.profilePic" class="w-full h-full object-cover">
+                    </template>
+                    <template x-if="!editData.profilePic">
+                        <div class="w-full h-full flex items-center justify-center text-3xl font-bold text-slate-500">
+                            <span x-text="editData.name ? editData.name.charAt(0) : '?'"></span>
+                        </div>
+                    </template>
+                </div>
+
+                <div class="flex gap-2">
+                    <button @click="$refs.modalPhotoInput.click()"
+                        class="bg-slate-800 px-4 py-2 rounded-xl text-[10px] font-bold hover:bg-slate-700 transition uppercase tracking-wider">Update
+                        Photo</button>
+
+                    <template x-if="editData.profilePic">
+                        <button @click="removePhoto()"
+                            class="bg-rose-500/10 text-rose-500 px-4 py-2 rounded-xl text-[10px] font-bold hover:bg-rose-500/20 transition uppercase tracking-wider">Remove</button>
+                    </template>
+                </div>
+                <input type="file" x-ref="modalPhotoInput" class="hidden" accept="image/*"
+                    @change="handlePhotoSelection($event)">
+            </div>
+
+            <div class="space-y-4">
+                <input x-model="editData.name" type="text" placeholder="Full Name"
+                    class="w-full bg-slate-800 p-4 rounded-2xl border border-slate-700 outline-none">
+                <input x-model="editData.rollNo" type="text" placeholder="Roll Number"
+                    class="w-full bg-slate-800 p-4 rounded-2xl border border-slate-700 outline-none">
+                <input x-model="editData.semester" type="number" placeholder="Semester"
+                    class="w-full bg-slate-800 p-4 rounded-2xl border border-slate-700 outline-none">
+                <!-- Inside your Edit Profile Modal, before the Cancel/Save buttons -->
+                <div class="mt-8 pt-6 border-t border-slate-700">
+                    <h3 class="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">Data Management
+                    </h3>
+                </div>
+
+                <div class="flex gap-3 pt-6">
+                    <button @click="showEditModal = false" class="flex-1 font-bold text-slate-500">Cancel</button>
+                    <button @click="saveProfile" :disabled="loading"
+                        class="flex-1 bg-indigo-600 py-4 rounded-2xl font-bold shadow-lg disabled:opacity-50">
+                        <span x-show="!loading">Save Changes</span>
+                        <span x-show="loading">Saving...</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Inside the Header -> Settings Menu -->
+
+
+    <div x-show="showPassResetModal"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[100] p-4" x-cloak>
+        <div class="glass p-10 rounded-[2.5rem] w-full max-w-md">
+            <h2 class="text-2xl font-black mb-6">Reset Password</h2>
+            <div class="space-y-4">
+                <input x-model="passReset.old" type="password" placeholder="Old Password"
+                    class="w-full bg-slate-800 p-4 rounded-2xl border border-slate-700 outline-none">
+                <input x-model="passReset.new" type="password" placeholder="New Password"
+                    class="w-full bg-slate-800 p-4 rounded-2xl border border-slate-700 outline-none">
+                <input x-model="passReset.confirm" type="password" placeholder="Confirm New Password"
+                    class="w-full bg-slate-800 p-4 rounded-2xl border border-slate-700 outline-none">
+                <div class="flex gap-3 pt-4">
+                    <button @click="showPassResetModal = false" class="flex-1 font-bold text-slate-500">Cancel</button>
+                    <button @click="handleSecurePassReset"
+                        class="flex-1 bg-indigo-600 py-3 rounded-2xl font-bold">Update</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="activeSubIndex !== null"
+        class="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center z-[100] p-4" x-cloak>
+        <div class="glass p-8 w-full max-w-md bg-[#161b22]">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-bold" x-text="subjects[activeSubIndex]?.name"></h3>
+                <button @click="activeSubIndex = null" class="text-slate-400 text-2xl">&times;</button>
+            </div>
+            <div class="flex justify-between items-center mb-6">
+                <button @click="changeMonth(-1)" class="text-slate-400 p-2">❮</button>
+                <div class="font-bold text-indigo-400" x-text="getMonthName()"></div>
+                <button @click="changeMonth(1)" class="text-slate-400 p-2">❯</button>
+            </div>
+            <div class="cal-grid mb-8">
+                <template x-for="blank in firstDayOfMonth">
+                    <div></div>
+                </template>
+                <template x-for="day in daysInMonth">
+                    <div @click="selectedDay = day" :class="getDayStatusClass(day)"
+                        class="day-box border border-slate-800" x-text="day"></div>
+                </template>
+            </div>
+            <div class="flex gap-3">
+                <button @click="markAction('P')"
+                    class="flex-1 bg-emerald-600 py-4 rounded-2xl font-bold shadow-lg">PRESENT</button>
+                <button @click="markAction('A')"
+                    class="flex-1 bg-rose-600 py-4 rounded-2xl font-bold shadow-lg">ABSENT</button>
+            </div>
+        </div>
+    </div>
+    <div x-show="showExtraModal"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[110] p-4" x-cloak>
+        <div class="glass p-8 rounded-[2.5rem] w-full max-w-md shadow-2xl">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-black text-white">Log Extra Class</h2>
+                <button @click="showExtraModal = false" class="text-slate-400 text-2xl">&times;</button>
+            </div>
+
+            <p class="text-xs text-slate-400 mb-6 font-medium">Select a subject to add it to today's schedule as an
+                extra session.</p>
+
+            <div class="space-y-3 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+                <template x-for="(sub, index) in subjects" :key="index">
+                    <div
+                        class="flex items-center justify-between p-4 bg-slate-800/50 border border-slate-700 rounded-2xl hover:border-indigo-500/50 transition-colors">
+                        <div>
+                            <p class="text-[10px] font-black text-indigo-400 uppercase" x-text="sub.code || 'SUB'">
+                            </p>
+                            <p class="font-bold text-slate-200 text-sm" x-text="sub.name"></p>
+                        </div>
+                        <button @click="handleQuickMark(index, 'P'); showExtraModal = false"
+                            class="bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black px-4 py-2 rounded-xl uppercase tracking-widest transition-all active:scale-95">
+                            Log Present
+                        </button>
+                    </div>
+                </template>
+            </div>
+
+            <button @click="showExtraModal = false" class="w-full mt-6 text-slate-500 font-bold text-sm">Close</button>
+        </div>
+    </div>
+    <!-- Archive Modal -->
+    <!-- Archive Modal -->
+    <div x-show="showArchiveModal"
+        class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md" x-cloak>
+        <div
+            class="glass w-full max-w-md p-8 rounded-[2.5rem] border border-slate-800 shadow-2xl relative overflow-hidden">
+
+            <button @click="showArchiveModal = false; showArchiveNameModal = false; archiveToDelete = null"
+                class="absolute top-6 right-6 text-slate-500 hover:text-white z-50">✕</button>
+
+            <div x-show="!showArchiveNameModal && !archiveToDelete" x-transition>
+                <h2 class="text-xl font-bold mb-2 flex items-center gap-2">
+                    Semester Archive <span>📦</span>
+                </h2>
+
+                <template x-if="localMessage.text">
+                    <div x-transition x-init="setTimeout(() => localMessage.text = '', 5000)"
+                        :class="localMessage.type === 'error' ? 'bg-rose-500/10 border-rose-500/30 text-rose-400' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'"
+                        class="p-4 rounded-2xl border text-[11px] font-bold mb-4 flex items-center gap-3">
+                        <span x-text="localMessage.type === 'error' ? '⚠️' : '✅'"></span>
+                        <span x-text="localMessage.text"></span>
+                    </div>
+                </template>
+
+                <p class="text-xs text-slate-400 mb-6 italic">Save your current progress or view previous records.</p>
+
+                <div class="space-y-3">
+                    <button @click="showArchiveNameModal = true"
+                        class="w-full flex items-center justify-between bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 p-4 rounded-2xl transition-all group text-left">
+                        <span class="text-xs font-bold text-amber-500 uppercase tracking-widest">Archive Current
+                            Semester</span>
+                        <span class="text-lg group-hover:translate-x-1 transition-transform">📦</span>
+                    </button>
+
+                    <template x-if="userData.archives && Object.keys(userData.archives).length > 0">
+                        <div class="mt-4 pt-4 border-t border-slate-800">
+                            <p class="text-[10px] font-bold text-slate-500 mb-3 uppercase tracking-widest text-center">
+                                Previous Archives</p>
+
+                            <div class="grid grid-cols-1 gap-2 max-h-40 overflow-y-auto pr-1 custom-scrollbar">
+                                <template x-for="(data, label) in userData.archives" :key="label">
+                                    <div class="flex items-center gap-2 group">
+                                        <button @click="viewArchive(label)"
+                                            class="flex-1 bg-slate-800/50 p-3 rounded-xl text-[10px] font-black text-slate-300 hover:bg-indigo-600 hover:text-white border border-slate-700 transition-all uppercase text-left">
+                                            <span x-text="label.replace(/_/g, ' ')"></span>
+                                        </button>
+
+                                        <button @click="archiveToDelete = label"
+                                            class="p-3 bg-rose-500/10 hover:bg-rose-600 text-rose-500 hover:text-white rounded-xl border border-rose-500/20 transition-all">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
+                                                </path>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+
+                    <template x-if="!userData.archives || Object.keys(userData.archives).length === 0">
+                        <p class="text-center text-slate-600 text-[10px] italic py-2">No previous archives found.</p>
+                    </template>
+                </div>
+            </div>
+
+            <div x-show="showArchiveNameModal" x-transition>
+                <h3 class="text-sm font-black text-amber-500 uppercase tracking-widest mb-4">Name this Archive</h3>
+                <p class="text-[10px] text-slate-400 mb-4">Enter a label to identify this semester's data later.</p>
+                <input type="text" x-model="archiveLabel" placeholder="e.g. 5th_Semester_Final"
+                    class="w-full bg-slate-900 p-4 rounded-2xl border border-slate-700 text-white outline-none focus:border-amber-500 transition-all mb-4">
+                <div class="flex gap-3">
+                    <button @click="showArchiveNameModal = false"
+                        class="flex-1 py-3 rounded-xl text-[10px] font-black uppercase text-slate-400 hover:bg-slate-800 transition-all">Go
+                        Back</button>
+                    <button @click="confirmArchive()"
+                        class="flex-1 py-3 bg-amber-500 rounded-xl text-[10px] font-black uppercase text-black hover:bg-amber-400 transition-all">Save
+                        Now</button>
+                </div>
+            </div>
+
+            <div x-show="archiveToDelete" x-transition class="text-center py-4">
+                <div
+                    class="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
+                    🗑️</div>
+                <h3 class="text-lg font-bold text-white mb-2">Delete Archive?</h3>
+                <p class="text-xs text-slate-400 mb-6">
+                    Are you sure you want to permanently delete <br>
+                    <span class="text-rose-400 font-bold uppercase tracking-tighter"
+                        x-text="archiveToDelete?.replace(/_/g, ' ')"></span>?
+                </p>
+                <div class="flex gap-3">
+                    <button @click="archiveToDelete = null"
+                        class="flex-1 py-3 rounded-xl text-[10px] font-black uppercase text-slate-400 bg-slate-800 hover:bg-slate-700 transition-all">
+                        Cancel
+                    </button>
+                    <button @click="confirmDeleteArchive()"
+                        class="flex-1 py-3 bg-rose-600 rounded-xl text-[10px] font-black uppercase text-white hover:bg-rose-500 transition-all shadow-lg shadow-rose-500/20">
+                        Delete Permanently
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+    <!-- Holiday List Modal -->
+    <div x-show="showHolidayListModal"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[130] p-4" x-cloak>
+        <div class="glass p-8 rounded-[2.5rem] w-full max-w-md shadow-2xl">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-black text-white">Holiday List</h2>
+                <button @click="showHolidayListModal = false" class="text-slate-400 text-2xl">&times;</button>
+            </div>
+
+            <div class="space-y-3 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
+                <template x-for="(h, index) in holidays" :key="index">
+                    <div
+                        class="flex items-center justify-between p-4 bg-slate-800/50 border border-slate-700 rounded-2xl">
+                        <div>
+                            <p class="font-bold text-slate-200 text-sm" x-text="h.label"></p>
+                            <p class="text-[10px] text-indigo-400 font-medium" x-text="h.start + ' to ' + h.end"></p>
+                        </div>
+                        <button @click="removeHoliday(index)"
+                            class="bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 p-2 rounded-xl transition-all">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </template>
+
+                <template x-if="holidays.length === 0">
+                    <div class="text-center py-10">
+                        <p class="text-slate-500 text-sm italic">No holidays scheduled.</p>
+                    </div>
+                </template>
+            </div>
+
+            <button @click="showHolidayListModal = false; showHolidayModal = true"
+                class="w-full mt-6 bg-indigo-600 py-4 rounded-2xl font-bold text-sm shadow-lg active:scale-95 transition-all">
+                + Add New Holiday
+            </button>
+        </div>
+    </div>
+    <div x-show="showDeleteConfirm"
+        class="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-rose-950/40 backdrop-blur-md" x-cloak>
+        <div
+            class="glass w-full max-w-md p-8 rounded-[2.5rem] border border-rose-500/30 shadow-2xl relative overflow-hidden">
+
+            <h2 class="text-2xl font-black mb-2 text-rose-500">Delete Account?</h2>
+            <p class="text-xs text-slate-400 mb-6 italic">This action is permanent and cannot be undone.</p>
+
+            <template x-if="localMessage.text">
+                <div
+                    class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-4 rounded-2xl text-[10px] font-bold mb-4 flex items-center gap-2">
+                    ⚠️ <span x-text="localMessage.text"></span>
+                </div>
+            </template>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="text-[9px] font-black text-slate-500 uppercase ml-1">Type your name: <span
+                            class="text-white" x-text="userData.name"></span></label>
+                    <input x-model="deleteConfirmName" type="text" placeholder="Confirm Name"
+                        class="w-full bg-slate-900 p-4 rounded-2xl border border-slate-700 outline-none focus:border-rose-500 transition-all">
+                </div>
+
+                <div>
+                    <label class="text-[9px] font-black text-slate-500 uppercase ml-1">Account Password</label>
+                    <input x-model="deletePassword" type="password" placeholder="Verify Password"
+                        class="w-full bg-slate-900 p-4 rounded-2xl border border-slate-700 outline-none focus:border-rose-500 transition-all">
+                </div>
+
+                <div class="flex gap-3 pt-4">
+                    <button
+                        @click="showDeleteConfirm = false; deletePassword = ''; deleteConfirmName = ''; localMessage.text = ''"
+                        class="flex-1 py-4 rounded-2xl font-bold text-slate-400 hover:bg-slate-800 transition-all">
+                        Cancel
+                    </button>
+
+                    <button @click="confirmPermanentDelete()" :disabled="loading"
+                        class="flex-1 bg-rose-600 py-4 rounded-2xl font-bold text-white shadow-lg shadow-rose-500/20 active:scale-95 transition-all disabled:opacity-50">
+                        <span x-show="!loading">Wipe All Data</span>
+                        <span x-show="loading">Wiping...</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] w-full max-w-xs px-4">
+        <template x-if="localMessage.text">
+            <div x-transition
+                :class="localMessage.type === 'error' ? 'glass border-rose-500/50 text-rose-500' : 'glass border-emerald-500/50 text-emerald-500'"
+                class="p-4 rounded-2xl shadow-2xl text-center font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3">
+                <span x-text="localMessage.type === 'error' ? '❌' : '✨'"></span>
+                <span x-text="localMessage.text"></span>
+            </div>
+        </template>
+    </div>
+
+    <script>
+        function appHandler() {
+            return {
+                view: 'signin',
+                isLoggedIn: false,
+                loading: false,
+                isOnline: navigator.onLine,
+                localMessage: { text: '', type: '' },
+
+                // --- 2. PERMANENT DATA & ARCHIVES ---
+                userData: {},
+                subjects: [],
+                holidays: [],
+                originalSubjects: [],
+                isArchiveView: false,
+
+                // --- 3. UI MODALS & OVERLAYS ---
+                showAddModal: false,
+                showEditModal: false,
+                showExtraModal: false,    // RESTORED
+                showHolidayModal: false,
+                showHolidayListModal: false,
+                showArchiveModal: false,
+                showArchiveNameModal: false,
+                showPassResetModal: false,
+                showDeleteConfirm: false,
+                archiveToDelete: null,
+
+                // --- 4. CALENDAR & MARKING STATE ---
+                activeSubIndex: null,
+                currentDate: new Date(),
+                selectedDay: new Date().getDate(),
+
+                // --- 5. AUTH & REGISTRATION FORMS ---
+                loginForm: { email: '', pass: '' },
+                reg: { name: '', roll: '', sem: '', email: '', pass: '', confirm: '' },
+                passReset: { old: '', new: '', confirm: '' },
+
+                // --- 6. PROFILE EDITING DATA ---
+                editData: { name: '', rollNo: '', semester: '', profilePic: '' },
+
+                // --- 7. SUBJECT CREATION DATA ---
+                tempName: '',
+                tempCode: '',
+                tempTime: '',
+                tempFaculty: '',
+                tempVenue: '',
+                tempDays: [],
+                tempSchedule: {},
+
+                // --- 8. HOLIDAY & ARCHIVE TOOLS ---
+                tempHoliday: { start: '', end: '', label: '' },
+                archiveLabel: '',
+
+                // --- 9. ACCOUNT DELETION CONFIRMATION ---
+                deletePassword: '',
+                deleteConfirmName: '',
+
+
+                viewArchive(label) {
+                    const archivedData = this.userData.archives[label];
+
+                    // Instead of native confirm(), we just switch the view
+                    // You can add a localMessage here if you want to notify the user
+                    if (!this.isArchiveView) {
+                        this.originalSubjects = [...this.subjects];
+                    }
+
+                    this.subjects = archivedData;
+                    this.isArchiveView = label;
+                    this.showArchiveModal = false;
+
+                    this.localMessage = { text: `Viewing: ${label.replace(/_/g, ' ')}`, type: 'success' };
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                },
+
+                exitArchive() {
+                    // Restore the subjects we saved before entering archive view
+                    this.subjects = this.originalSubjects;
+                    this.isArchiveView = false;
+                    this.originalSubjects = [];
+                },
+                async confirmDeleteArchive() {
+                    if (!this.archiveToDelete) return;
+
+                    const label = this.archiveToDelete;
+                    this.loading = true;
+
+                    const u = window.auth.currentUser;
+                    const docRef = window.fb.doc(window.db, "users", u.uid);
+
+                    try {
+                        // 1. Delete from local object
+                        delete this.userData.archives[label];
+
+                        // 2. Sync updated archives object to Firestore
+                        await window.fb.updateDoc(docRef, {
+                            archives: this.userData.archives
+                        });
+
+                        // 3. UI Cleanup
+                        this.archiveToDelete = null;
+                        this.localMessage = { text: "Archive removed permanently.", type: 'success' };
+                    } catch (e) {
+                        console.error("Delete Error:", e);
+                        this.localMessage = { text: "Error deleting archive.", type: 'error' };
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                initAuth() {
+                    window.fb.onAuthStateChanged(window.auth, async (user) => {
+                        if (user) {
+                            // OPTIMIZATION: Check cached status first. No 'await user.reload()' here.
+                            if (!user.emailVerified) {
+                                this.isLoggedIn = false;
+                                this.view = 'verify-email';
+                                this.reg.email = user.email;
+                                return;
+                            }
+
+                            // If already verified in cache, load data immediately
+                            const docRef = window.fb.doc(window.db, "users", user.uid);
+                            const docSnap = await window.fb.getDoc(docRef);
+
+                            if (docSnap.exists()) {
+                                this.userData = docSnap.data();
+                                this.subjects = this.userData.subjects || [];
+                                this.holidays = this.userData.holidays || [];
+                                this.isLoggedIn = true; // Dashboard appears instantly
+
+                                this.registerServiceWorker();
+                                this.requestNotificationPermission();
+                                navigator.serviceWorker.ready.then(() => this.startReminderEngine());
+                            }
+                        } else {
+                            this.isLoggedIn = false;
+                            this.view = 'signin';
+                        }
+                    });
+                    this.initOnlineStatus();
+                },
+                async checkVerificationStatus() {
+                    const user = window.auth.currentUser;
+                    if (user) {
+                        this.loading = true;
+                        // The slow network request only happens here!
+                        await user.reload();
+                        if (window.auth.currentUser.emailVerified) {
+                            this.localMessage = { text: "Verified! Loading...", type: 'success' };
+                            window.location.reload();
+                        } else {
+                            this.localMessage = { text: "Still not verified. Please click the link in your email.", type: 'error' };
+                            this.loading = false;
+                        }
+                    }
+                },
+                async resendVerification() {
+                    this.loading = true;
+                    try {
+                        const { sendEmailVerification } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js");
+                        if (window.auth.currentUser) {
+                            await sendEmailVerification(window.auth.currentUser);
+                            alert("Verification link resent! Check your inbox.");
+                        }
+                    } catch (e) {
+                        alert("Error: " + e.message);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Helper: Request Permission
+                requestNotificationPermission() {
+                    if (Notification.permission === "default") {
+                        Notification.requestPermission();
+                    }
+                },
+
+                // Helper: Send Notification if classes exist today
+                checkReminders() {
+                    const today = new Date().toLocaleDateString('en-US', { weekday: 'short' });
+                    const todayClasses = this.subjects.filter(s => s.days && s.days.includes(today));
+
+                    if (todayClasses.length > 0 && Notification.permission === "granted") {
+                        const n = new Notification("Attendance Tracker", {
+                            body: `You have ${todayClasses.length} classes scheduled for today!`,
+                            // Use profile pic or a fallback attendance icon
+                            icon: this.userData.profilePic || 'https://cdn-icons-png.flaticon.com/512/2693/2693507.png'
+                        });
+
+                        // Makes the notification bring the user back to the app when clicked
+                        n.onclick = () => {
+                            window.focus();
+                        };
+                    }
+                },
+                // Part 1: Open the naming tab
+
+
+                // Part 2: The actual saving logic
+                async confirmArchive() {
+                    if (!this.archiveLabel.trim()) {
+                        this.localMessage = { text: "Please enter a name for the archive.", type: 'error' };
+                        return;
+                    }
+
+                    this.loading = true;
+                    const label = this.archiveLabel.trim().replace(/\s+/g, '_');
+                    const u = window.auth.currentUser;
+                    const docRef = window.fb.doc(window.db, "users", u.uid);
+
+                    try {
+                        const dataToArchive = JSON.parse(JSON.stringify(this.subjects));
+
+                        // 1. Update Firebase
+                        await window.fb.updateDoc(docRef, {
+                            [`archives.${label}`]: dataToArchive,
+                            subjects: []
+                        });
+
+                        // 2. Update Local Memory (Desktop UI)
+                        if (!this.userData.archives) this.userData.archives = {};
+                        this.userData.archives[label] = dataToArchive;
+                        this.subjects = [];
+
+                        // 3. Close Modals
+                        this.showArchiveNameModal = false;
+                        this.showArchiveModal = false;
+                        this.archiveLabel = '';
+
+                        // 4. Show Local Desktop Success Message
+                        this.localMessage = { text: "Semester archived! Dashboard cleared.", type: 'success' };
+
+                    } catch (e) {
+                        this.localMessage = { text: "Archive failed: " + e.message, type: 'error' };
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                initOnlineStatus() {
+                    window.addEventListener('online', () => { this.isOnline = true; this.sync(); });
+                    window.addEventListener('offline', () => { this.isOnline = false; });
+                },
+
+                validateStep1() {
+                    const isValid = this.reg.name && this.reg.roll && this.reg.sem && this.reg.email && this.reg.email.includes('@');
+                    if (isValid) {
+                        this.view = 'signup2';
+                    } else {
+                        console.log("Validation failed - Check fields");
+                    }
+                },
+                isHoliday(date = new Date()) {
+                    // Get local date string in YYYY-MM-DD format
+                    const year = date.getFullYear();
+                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                    const day = String(date.getDate()).padStart(2, '0');
+                    const todayStr = `${year}-${month}-${day}`;
+
+                    // Check if today falls within any holiday range
+                    return this.holidays.some(h => todayStr >= h.start && todayStr <= h.end);
+                },
+
+                async addHoliday() {
+                    if (!this.tempHoliday.start || !this.tempHoliday.label) return;
+                    // If no end date, treat it as a single-day holiday
+                    if (!this.tempHoliday.end) this.tempHoliday.end = this.tempHoliday.start;
+
+                    this.holidays.push({ ...this.tempHoliday });
+                    await this.syncHolidays();
+                    this.tempHoliday = { start: '', end: '', label: '' };
+                    this.showHolidayModal = false;
+                },
+
+                async syncHolidays() {
+                    const u = window.auth.currentUser;
+                    if (u) {
+                        try {
+                            const docRef = window.fb.doc(window.db, "users", u.uid);
+                            await window.fb.updateDoc(docRef, {
+                                holidays: JSON.parse(JSON.stringify(this.holidays))
+                            });
+                            console.log("Holidays synced successfully");
+                        } catch (e) {
+                            console.error("Holiday Sync Error:", e);
+                        }
+                    }
+                },
+                async removeHoliday(index) {
+                    if (confirm(`Remove "${this.holidays[index].label}" from the holiday list?`)) {
+                        this.holidays.splice(index, 1);
+
+                        // Sync to Firebase
+                        const u = window.auth.currentUser;
+                        if (u) {
+                            const docRef = window.fb.doc(window.db, "users", u.uid);
+                            await window.fb.updateDoc(docRef, {
+                                holidays: JSON.parse(JSON.stringify(this.holidays))
+                            });
+                        }
+                    }
+                },
+
+                async sync() {
+                    const u = window.auth.currentUser;
+                    if (u) {
+                        try {
+                            const docRef = window.fb.doc(window.db, "users", u.uid);
+                            await window.fb.updateDoc(docRef, {
+                                subjects: JSON.parse(JSON.stringify(this.subjects)),
+                                lastUpdated: new Date().toISOString()
+                            });
+                        } catch (e) { console.error("Sync Error", e); }
+                    }
+                },
+
+                async handleLogin() {
+                    this.loading = true;
+                    try {
+                        await window.fb.signInWithEmailAndPassword(window.auth, this.loginForm.email, this.loginForm.pass);
+                    } catch (e) {
+                        this.localMessage = {
+                            text: e.code === 'auth/invalid-credential' ? "Wrong email or password." : e.message,
+                            type: 'error'
+                        };
+                    } finally { this.loading = false; }
+                },
+                // Add these inside the return object of appHandler()
+                getTodayStatus(sub) {
+                    if (!sub || !sub.history) return null;
+                    const today = new Date();
+                    // month is 0-indexed in JS, so we use it directly to match your calendar marking logic
+                    const dateStr = `${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`;
+                    return sub.history[dateStr] || null;
+                },
+
+                // Inside your appHandler return object:
+
+                async handleQuickMark(subIndex, status) {
+                    const today = new Date();
+                    const dateStr = `${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`;
+                    const sub = this.subjects[subIndex];
+                    const currentStatus = sub.history ? sub.history[dateStr] : null;
+
+                    // Logic: If clicking the SAME status that is already active, open calendar
+                    if (currentStatus === status) {
+                        this.openCalendar(subIndex);
+                        return;
+                    }
+
+                    if (!sub.history) sub.history = {};
+                    sub.history[dateStr] = status; // Status can be 'P', 'A', or 'C'
+
+                    await this.sync();
+                },
+
+                // Update your existing getPercent to ensure 'C' doesn't count as a total class
+                getPercent(s) {
+                    const hist = s.history ? Object.values(s.history) : [];
+                    // Filter out 'C' (Cancelled) so it doesn't increase the total divisor
+                    const relevantClasses = hist.filter(v => v === 'P' || v === 'A');
+                    return relevantClasses.length
+                        ? Math.round((relevantClasses.filter(v => v === 'P').length / relevantClasses.length) * 100)
+                        : 0;
+                },
+
+                async handleSignup() {
+                    this.loading = true;
+                    try {
+                        const res = await window.fb.createUserWithEmailAndPassword(window.auth, this.reg.email, this.reg.pass);
+                        const { sendEmailVerification } = await import("https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js");
+                        await sendEmailVerification(res.user);
+
+                        await window.fb.setDoc(window.fb.doc(window.db, "users", res.user.uid), {
+                            name: this.reg.name, rollNo: this.reg.roll, semester: this.reg.sem, subjects: [], createdAt: new Date().toISOString()
+                        });
+
+                        this.view = 'verify-email';
+                        this.localMessage = { text: "Verification link sent! Please check your inbox.", type: 'success' };
+                    } catch (e) {
+                        this.localMessage = { text: e.message, type: 'error' };
+                    } finally { this.loading = false; }
+                },
+
+                handleLogout() { window.fb.signOut(window.auth); window.location.reload(); },
+
+                handlePhotoSelection(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            const canvas = document.createElement('canvas');
+                            const MAX_WIDTH = 400;
+                            let width = img.width, height = img.height;
+                            if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+                            canvas.width = width; canvas.height = height;
+                            canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+                            this.editData.profilePic = canvas.toDataURL('image/jpeg', 0.7);
+                        };
+                        img.src = e.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                },
+
+                removePhoto() { this.editData.profilePic = ''; },
+
+                async saveProfile() {
+                    this.loading = true;
+                    try {
+                        const u = window.auth.currentUser;
+                        const updatedData = {
+                            name: this.editData.name, rollNo: this.editData.rollNo,
+                            semester: this.editData.semester, profilePic: this.editData.profilePic
+                        };
+                        await window.fb.updateDoc(window.fb.doc(window.db, "users", u.uid), updatedData);
+                        this.userData = { ...this.userData, ...updatedData };
+                        this.showEditModal = false;
+                        alert("Profile updated!");
+                    } catch (e) { alert(e.message); } finally { this.loading = false; }
+                },
+
+                emailFaculty(sub) {
+                    const subject = encodeURIComponent(`Attendance Verification: ${sub.name} - ${this.userData.name}`);
+                    const body = encodeURIComponent(
+                        `Dear Professor,\n\nI am writing to share my personal attendance log for ${sub.name} (${sub.code || ''}).\n\n` +
+                        `According to my records, my current attendance is ${this.getPercent(sub)}%.\n` +
+                        `I have attached the detailed PDF report generated from AttendTrack Pro for your reference.\n\n` +
+                        `Best regards,\n${this.userData.name}\nRoll No: ${this.userData.rollNo}`
+                    );
+
+                    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+                },
+
+                generatePDF(sub) {
+                    if (!window.jspdf) return alert("PDF library loading...");
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF();
+                    const history = sub.history || {};
+                    const dates = Object.keys(history).sort((a, b) => new Date(a) - new Date(b));
+
+                    // 1. Professional Header
+                    doc.setFillColor(30, 41, 59); // Dark slate
+                    doc.rect(0, 0, 210, 40, 'F');
+                    doc.setTextColor(255, 255, 255);
+                    doc.setFontSize(22);
+                    doc.text("ATTENDANCE VERIFICATION REPORT", 20, 25);
+
+                    // 2. Student & Subject Info Block
+                    doc.setTextColor(0, 0, 0);
+                    doc.setFontSize(10);
+
+                    // Left Column: Student Details
+                    doc.setFont("helvetica", "bold");
+                    doc.text("STUDENT DETAILS", 20, 50);
+                    doc.setFont("helvetica", "normal");
+                    doc.text(`Name: ${this.userData.name}`, 20, 56);
+                    doc.text(`Roll No: ${this.userData.rollNo}`, 20, 62);
+                    doc.text(`Semester: ${this.userData.semester}`, 20, 68);
+
+                    // Right Column: Course Details (Updated with Faculty & Venue)
+                    doc.setFont("helvetica", "bold");
+                    doc.text("COURSE DETAILS", 110, 50);
+                    doc.setFont("helvetica", "normal");
+                    doc.text(`Subject: ${sub.name}`, 110, 56);
+                    doc.text(`Faculty: ${sub.faculty || 'Not Assigned'}`, 110, 62);
+                    doc.text(`Venue: ${sub.venue || 'N/A'}`, 110, 68);
+                    doc.text(`Attendance: ${this.getPercent(sub)}%`, 110, 74);
+
+                    // 3. Summary Statistics
+                    doc.setDrawColor(200, 200, 200);
+                    doc.line(20, 80, 190, 80); // Adjusted line position
+                    const pCount = Object.values(history).filter(v => v === 'P').length;
+                    const aCount = Object.values(history).filter(v => v === 'A').length;
+                    doc.text(`Total Sessions: ${pCount + aCount}  |  Present: ${pCount}  |  Absent: ${aCount}`, 20, 87);
+                    doc.line(20, 92, 190, 92);
+
+                    // 4. Attendance Log Table
+                    doc.setFont("helvetica", "bold");
+                    doc.text("DATE", 25, 102);
+                    doc.text("STATUS", 110, 102);
+
+                    doc.setFont("helvetica", "normal");
+                    let y = 112;
+                    dates.forEach((dateStr) => {
+                        if (y > 270) { doc.addPage(); y = 20; }
+                        const [year, month, day] = dateStr.split('-');
+                        const formattedDate = `${day}/${parseInt(month) + 1}/${year}`;
+                        doc.text(formattedDate, 25, y);
+
+                        const status = history[dateStr];
+                        if (status === 'P') {
+                            doc.setTextColor(34, 197, 94); // Emerald Green
+                            doc.text("PRESENT", 110, y);
+                        } else if (status === 'A') {
+                            doc.setTextColor(225, 29, 72); // Rose Red
+                            doc.text("ABSENT", 110, y);
+                        } else {
+                            doc.setTextColor(100, 100, 100);
+                            doc.text("CANCELLED", 110, y);
+                        }
+
+                        doc.setTextColor(0, 0, 0);
+                        y += 8;
+                    });
+
+                    // 5. Signature Line for Faculty
+                    y += 15;
+                    if (y > 270) { doc.addPage(); y = 30; }
+                    doc.setFontSize(8);
+                    doc.text("This report is electronically generated for attendance tracking purposes.", 20, y);
+                    doc.text("__________________________", 140, y + 10);
+                    doc.text(`Prof. ${sub.faculty || 'Instructor'} Signature`, 140, y + 15);
+
+                    doc.save(`${this.userData.name}_${sub.name}_Report.pdf`);
+                },
+
+                // Other necessary helpers
+                async addSubject() {
+                    if (!this.tempName) return;
+
+                    let finalSchedule = {};
+                    this.tempDays.forEach(day => {
+                        finalSchedule[day] = this.tempSchedule[day] || "09:00";
+                    });
+
+                    this.subjects.push({
+                        name: this.tempName,
+                        code: this.tempCode.toUpperCase(),
+                        faculty: this.tempFaculty || '', // New Field
+                        venue: this.tempVenue || '',     // New Field
+                        schedule: finalSchedule,
+                        history: {},
+                        days: [...this.tempDays]
+                    });
+
+                    await this.sync();
+
+                    // Reset fields
+                    this.tempName = ''; this.tempCode = ''; this.tempDays = [];
+                    this.tempSchedule = {}; this.tempFaculty = ''; this.tempVenue = '';
+                    this.showAddModal = false;
+                },
+                startReminderEngine() {
+                    const now = new Date();
+                    const today = now.toLocaleDateString('en-US', { weekday: 'short' });
+
+                    if (!navigator.serviceWorker.controller) {
+                        console.warn("Service Worker not active yet. Retrying in 3s...");
+                        setTimeout(() => this.startReminderEngine(), 3000);
+                        return;
+                    }
+
+                    this.subjects.forEach(sub => {
+                        const scheduledTime = sub.schedule ? sub.schedule[today] : null;
+
+                        // Only schedule if it's a school day and not a holiday
+                        if (scheduledTime && !this.isHoliday()) {
+                            const [hours, minutes] = scheduledTime.split(':').map(Number);
+                            const classTime = new Date();
+                            classTime.setHours(hours, minutes, 0);
+
+                            // Calculate 10 minutes before class
+                            const notifyTime = new Date(classTime.getTime() - 10 * 60000);
+                            const msUntilNotify = notifyTime.getTime() - now.getTime();
+
+                            // Only send to worker if the notification time is in the future
+                            if (msUntilNotify > 0) {
+                                navigator.serviceWorker.controller.postMessage({
+                                    type: 'SCHEDULE_NOTIFICATION',
+                                    subName: sub.name,
+                                    timeUntil: msUntilNotify
+                                });
+                                console.log(`Notification scheduled for ${sub.name} in ${Math.round(msUntilNotify / 60000)} mins`);
+                            }
+                        }
+                    });
+                },
+                registerServiceWorker() {
+                    if ('serviceWorker' in navigator) {
+                        navigator.serviceWorker.register('sw.js', { scope: './' }) // Explicit scope
+                            .then(reg => {
+                                console.log('SW Registered');
+                                // Check for updates
+                                reg.onupdatefound = () => {
+                                    const installingWorker = reg.installing;
+                                    installingWorker.onstatechange = () => {
+                                        if (installingWorker.state === 'installed') {
+                                            if (navigator.serviceWorker.controller) {
+                                                console.log('New content available; please refresh.');
+                                            }
+                                        }
+                                    };
+                                };
+                            })
+                            .catch(err => console.log('SW Registration Failed', err));
+                    }
+                },
+
+                sendClassNotification(sub) {
+                    if (Notification.permission === "granted") {
+                        const n = new Notification("Class Starting!", {
+                            body: `${sub.name} is starting now. Don't forget to mark your attendance!`,
+                            icon: 'https://cdn-icons-png.flaticon.com/512/2693/2693507.png'
+                        });
+
+                        n.onclick = () => {
+                            window.focus();
+                            this.showExtraModal = false; // Close any modals to show dashboard
+                        };
+                    }
+                },
+                async clearTodayStatus(subIndex) {
+                    const today = new Date();
+                    const dateStr = `${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`;
+                    const sub = this.subjects[subIndex];
+
+                    if (sub.history && sub.history[dateStr]) {
+                        delete sub.history[dateStr];
+                        await this.sync();
+                    }
+                },
+                // Add this helper inside your appHandler return object
+                getTodayStatus(sub) {
+                    const today = new Date();
+                    const dateStr = `${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`;
+                    return sub.history ? sub.history[dateStr] : null;
+                },
+                // Add this inside your appHandler() return object
+                async archiveCurrentSemester() {
+                    const semLabel = prompt("Enter a label for this archive (e.g., Sem 4 - Spring 2026):");
+                    if (!semLabel) return;
+
+                    if (confirm(`This will move all current subjects to '${semLabel}' and clear your active dashboard. Proceed?`)) {
+                        this.loading = true;
+                        try {
+                            const u = window.auth.currentUser;
+                            const docRef = window.fb.doc(window.db, "users", u.uid);
+
+                            // Format the key to be Firestore-friendly (no spaces)
+                            const archiveKey = semLabel.replace(/\s+/g, '_');
+
+                            // 1. Update Firestore: Use dot notation to add to the 'archives' object
+                            // This prevents overwriting other archives
+                            await window.fb.updateDoc(docRef, {
+                                [`archives.${archiveKey}`]: JSON.parse(JSON.stringify(this.subjects)),
+                                subjects: [] // Reset active subjects
+                            });
+
+                            // 2. Update local state
+                            this.subjects = [];
+                            this.userData.archives = {
+                                ...(this.userData.archives || {}),
+                                [archiveKey]: JSON.parse(JSON.stringify(this.subjects))
+                            };
+
+                            alert("Semester archived successfully!");
+                        } catch (e) {
+                            console.error("Archive Error:", e);
+                            alert("Archive failed. Check console for details.");
+                        } finally {
+                            this.loading = false;
+                        }
+                    }
+                },
+                calculateSafeToMiss(s) {
+                    const hist = s.history ? Object.values(s.history) : [];
+                    if (hist.length === 0) return 0;
+
+                    const P = hist.filter(v => v === 'P').length;
+                    const T = hist.length;
+
+                    // Formula: How many Absents can we add before % drops below 75
+                    // (P / (T + X)) = 0.75  => X = (P / 0.75) - T
+                    let x = Math.floor(P / 0.75 - T);
+                    return x > 0 ? x : 0;
+                },
+                // Add this inside your appHandler()
+                registerServiceWorker() {
+                    if ('serviceWorker' in navigator) {
+                        navigator.serviceWorker.register('sw.js')
+                            .then(reg => console.log('SW Registered'))
+                            .catch(err => console.log('SW Failed', err));
+                    }
+                },
+
+                // Trigger this whenever the app loads
+                init() {
+                    this.registerServiceWorker();
+                    this.requestNotificationPermission();
+                },
+                deleteSubject(index) {
+                    if (confirm(`Delete ${this.subjects[index].name}?`)) {
+                        this.subjects.splice(index, 1); this.sync();
+                    }
+                },
+
+                calculateNeeded(s) {
+                    const hist = s.history ? Object.values(s.history) : [];
+                    const P = hist.filter(v => v === 'P').length, T = hist.length;
+                    let n = (3 * T) - (4 * P); return n > 0 ? n : 0;
+                },
+                calculateTotalAvg() {
+                    if (!this.subjects.length) return 0;
+                    return Math.round(this.subjects.reduce((a, b) => a + this.getPercent(b), 0) / this.subjects.length);
+                },
+                getMonthName() { return this.currentDate.toLocaleString('default', { month: 'long', year: 'numeric' }); },
+                get daysInMonth() { return new Date(this.currentDate.getFullYear(), this.currentDate.getMonth() + 1, 0).getDate(); },
+                get firstDayOfMonth() { return new Date(this.currentDate.getFullYear(), this.currentDate.getMonth(), 1).getDay(); },
+                changeMonth(n) { this.currentDate.setMonth(this.currentDate.getMonth() + n); this.currentDate = new Date(this.currentDate); },
+                getDayStatusClass(day) {
+                    const dateStr = `${this.currentDate.getFullYear()}-${this.currentDate.getMonth()}-${day}`;
+                    const history = this.subjects[this.activeSubIndex]?.history || {};
+                    if (history[dateStr] === 'P') return 'bg-emerald-600 text-white';
+                    if (history[dateStr] === 'A') return 'bg-rose-600 text-white';
+                    return this.selectedDay === day ? 'bg-indigo-600' : 'bg-slate-900';
+                },
+                openCalendar(idx) { this.activeSubIndex = idx; this.currentDate = new Date(); this.selectedDay = new Date().getDate(); },
+                async markAction(status) {
+                    const dateStr = `${this.currentDate.getFullYear()}-${this.currentDate.getMonth()}-${this.selectedDay}`;
+                    if (!this.subjects[this.activeSubIndex].history) this.subjects[this.activeSubIndex].history = {};
+                    this.subjects[this.activeSubIndex].history[dateStr] = status;
+                    await this.sync(); this.activeSubIndex = null;
+                },
+                openEditProfile() {
+                    this.editData = { name: this.userData.name, rollNo: this.userData.rollNo, semester: this.userData.semester, profilePic: this.userData.profilePic || '' };
+                    this.showEditModal = true;
+                },
+                async confirmPermanentDelete() {
+                    const user = window.auth.currentUser;
+
+                    // 1. Local Validation
+                    if (this.deleteConfirmName !== this.userData.name) {
+                        this.localMessage = { text: "Name doesn't match.", type: 'error' };
+                        return;
+                    }
+                    if (!this.deletePassword) {
+                        this.localMessage = { text: "Password required.", type: 'error' };
+                        return;
+                    }
+
+                    this.loading = true;
+                    try {
+                        // 2. Re-authenticate
+                        const credential = window.fb.EmailAuthProvider.credential(user.email, this.deletePassword);
+                        await window.fb.reauthenticateWithCredential(user, credential);
+
+                        // 3. Wipe Firestore
+                        await window.fb.deleteDoc(window.fb.doc(window.db, "users", user.uid));
+
+                        // 4. Delete Auth User
+                        await window.fb.deleteUser(user);
+
+                        // 5. Cleanup UI
+                        window.location.reload();
+                    } catch (e) {
+                        this.localMessage = {
+                            text: e.code === 'auth/wrong-password' ? "Incorrect password." : e.message,
+                            type: 'error'
+                        };
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                async handleSecurePassReset() {
+                    const user = window.auth.currentUser;
+                    const cred = window.fb.EmailAuthProvider.credential(user.email, this.passReset.old);
+                    try {
+                        await window.fb.reauthenticateWithCredential(user, cred);
+                        await window.fb.updatePassword(user, this.passReset.new);
+                        alert("Password updated!"); this.showPassResetModal = false;
+                    } catch (e) { alert(e.message); }
+                }
+            }
+        }
+    </script>
+</body>
+
+</html>
